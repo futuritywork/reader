@@ -1,3 +1,4 @@
+import requestLimiter = require('../lib/reader-request-limiter.cjs');
 import { singleton } from 'tsyringe';
 import { randomUUID } from 'crypto';
 import _ from 'lodash';
@@ -65,6 +66,7 @@ import { BogoSitesControl } from '../services/bogo-sites';
 
 
 export const sha256Hasher = new HashManager('sha256', 'hex');
+const readerAdmission = requestLimiter(2, 32, 25000, (message: string) => new ServiceNodeResourceDrainError(message));
 
 export interface ExtraScrappingOptions extends ScrappingOptions {
     withIframe?: boolean | 'quoted';
@@ -293,161 +295,218 @@ export class CrawlerHost extends RPCHost {
         crawlerOptionsHeaderOnly: CrawlerOptionsHeaderOnly,
         crawlerOptionsParamsAllowed: CrawlerOptions,
     ) {
-        let chargeAmount = 0;
-        let finalSnapshot: PageSnapshot | undefined;
-        const crawlerOptions = ctx.method === 'GET' ? crawlerOptionsHeaderOnly : crawlerOptionsParamsAllowed;
-        const tierPolicy = await this.saasAssertTierPolicy(crawlerOptions, auth);
-        const futureRateLimit = this.storageLayer.rateLimit(ctx, rpcReflect, auth as any);
+        const releaseReaderSlot = await readerAdmission(rpcReflect.signal);
+        try {
+            rpcReflect.signal.throwIfAborted();
+            let chargeAmount = 0;
+            let finalSnapshot: PageSnapshot | undefined;
+            const crawlerOptions = ctx.method === 'GET' ? crawlerOptionsHeaderOnly : crawlerOptionsParamsAllowed;
+            const tierPolicy = await this.saasAssertTierPolicy(crawlerOptions, auth);
+            const futureRateLimit = this.storageLayer.rateLimit(ctx, rpcReflect, auth as any);
 
-        // Use koa ctx.URL, a standard URL object to avoid node.js framework prop naming confusion
-        const targetUrl = await this.getTargetUrl(tryDecodeURIComponent(`${ctx.URL.pathname}${ctx.URL.search}`), crawlerOptions, ctx.URL.host);
-        if (!targetUrl) {
-            return await this.getIndex(auth);
-        }
-        crawlerOptions.url = targetUrl.toString();
-
-        // Prevent circular crawling
-        this.puppeteerControl.circuitBreakerHosts.add(
-            ctx.hostname.toLowerCase()
-        );
-
-        const {
-            isAnonymous,
-            uid,
-            reportOptions,
-            reportUsage
-        } = await futureRateLimit;
-
-        rpcReflect.finally(() => {
-            reportOptions?.(crawlerOptions.customizedProps());
-            if (crawlerOptions.tokenBudget && chargeAmount > crawlerOptions.tokenBudget) {
-                return;
+            // Use koa ctx.URL, a standard URL object to avoid node.js framework prop naming confusion
+            const targetUrl = await this.getTargetUrl(tryDecodeURIComponent(`${ctx.URL.pathname}${ctx.URL.search}`), crawlerOptions, ctx.URL.host);
+            if (!targetUrl) {
+                return await this.getIndex(auth);
             }
-            reportUsage?.(chargeAmount, 'reader-crawl');
-        });
+            crawlerOptions.url = targetUrl.toString();
 
-        if (isAnonymous && !auth.isInternal) {
-            // Enforce no proxy is allocated for anonymous users due to abuse.
-            crawlerOptions.proxy = 'none';
-            if (crawlerOptions.respondWith.includes('html')) {
-                crawlerOptions.engine ??= ENGINE_TYPE.CURL;
-            }
-            const blockade = await this.storageLayer.findDomainBlockade({
-                domain: targetUrl.hostname.toLowerCase(),
-                expireAt: new Date()
-            }).catch((err) => {
-                this.logger.warn(`Failed to query domain blockade for ${targetUrl.hostname}`, { err });
-                return undefined;
-            });
+            // Prevent circular crawling
+            this.puppeteerControl.circuitBreakerHosts.add(
+                ctx.hostname.toLowerCase()
+            );
 
-            if (blockade) {
-                throw new SecurityCompromiseError(`Anonymous access to domain ${targetUrl.hostname} blocked until ${blockade.expireAt || 'Eternally'} due to previous abuse found on ${blockade.triggerUrl || 'site'}: ${blockade.triggerReason}`);
-            }
-        }
-        const crawlOpts = await this.configure(crawlerOptions);
-        this.threadLocal.set('readerAbortSignal', rpcReflect.signal);
-        if (auth.isInternal) {
-            crawlOpts.eligibleForPageIndex = true;
-            this.threadLocal.set('isInternal', true);
-        }
-        this.logger.info(`Accepting request from ${uid || ctx.ip}`, { opts: crawlerOptions });
-        rpcReflect.finally(() => {
-            if (!finalSnapshot) {
-                return;
-            }
-            this.emit('index-snapshot', targetUrl, finalSnapshot, crawlOpts);
-        });
-        if (crawlerOptions.robotsTxt) {
-            await this.robotsTxtService.assertAccessAllowed(targetUrl, crawlerOptions.robotsTxt);
-        }
-        if (rpcReflect.signal.aborted) {
-            return;
-        }
-        rpcReflect.catch((err) => {
-            if (!(err instanceof AssertionFailureError)) {
-                return;
-            }
-            const nowDate = new Date();
-            this.storageLayer.storeConsecutiveError({
-                _id: this.getUrlDigest(targetUrl),
-                url: targetUrl.toString(),
-                lastError: `${err}`,
-                updatedAt: nowDate,
-                createdAt: nowDate,
-                expireAt: new Date(Date.now() + this.abuseBlockMs),
-                count: 1,
-            }).catch((err) => {
-                this.logger.warn(`Failed to save consecutive error for ${targetUrl}`, { err: marshalErrorLike(err) });
-            });
-        });
-        if (!ctx.accepts('text/plain') && ctx.accepts('text/event-stream')) {
-            const sseStream = new OutputServerEventStream();
-            rpcReflect.return(sseStream);
-            let scrapped: PageSnapshot;
-            const seenSnapshot = new WeakSet();
-            let job;
-            const writeToStream = async () => {
-                if (seenSnapshot.has(scrapped)) {
-                    job = undefined;
+            const {
+                isAnonymous,
+                uid,
+                reportOptions,
+                reportUsage
+            } = await futureRateLimit;
+
+            rpcReflect.finally(() => {
+                reportOptions?.(crawlerOptions.customizedProps());
+                if (crawlerOptions.tokenBudget && chargeAmount > crawlerOptions.tokenBudget) {
                     return;
                 }
-                rpcReflect.signal.throwIfAborted();
-                const formatted = await this.formatSnapshot(crawlerOptions, scrapped!, targetUrl, this.urlValidMs);
-                seenSnapshot.add(scrapped);
-                finalSnapshot = scrapped;
-                chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
-                if (!sseStream.writableEnded) {
-                    sseStream.write({
-                        event: 'data',
-                        data: formatted,
+                reportUsage?.(chargeAmount, 'reader-crawl');
+            });
+
+            if (isAnonymous && !auth.isInternal) {
+                // Enforce no proxy is allocated for anonymous users due to abuse.
+                crawlerOptions.proxy = 'none';
+                if (crawlerOptions.respondWith.includes('html')) {
+                    crawlerOptions.engine ??= ENGINE_TYPE.CURL;
+                }
+                const blockade = await this.storageLayer.findDomainBlockade({
+                    domain: targetUrl.hostname.toLowerCase(),
+                    expireAt: new Date()
+                }).catch((err) => {
+                    this.logger.warn(`Failed to query domain blockade for ${targetUrl.hostname}`, { err });
+                    return undefined;
+                });
+
+                if (blockade) {
+                    throw new SecurityCompromiseError(`Anonymous access to domain ${targetUrl.hostname} blocked until ${blockade.expireAt || 'Eternally'} due to previous abuse found on ${blockade.triggerUrl || 'site'}: ${blockade.triggerReason}`);
+                }
+            }
+            const crawlOpts = await this.configure(crawlerOptions);
+            this.threadLocal.set('readerAbortSignal', rpcReflect.signal);
+            if (auth.isInternal) {
+                crawlOpts.eligibleForPageIndex = true;
+                this.threadLocal.set('isInternal', true);
+            }
+            this.logger.info(`Accepting request from ${uid || ctx.ip}`, { opts: crawlerOptions });
+            rpcReflect.finally(() => {
+                if (!finalSnapshot) {
+                    return;
+                }
+                this.emit('index-snapshot', targetUrl, finalSnapshot, crawlOpts);
+            });
+            if (crawlerOptions.robotsTxt) {
+                await this.robotsTxtService.assertAccessAllowed(targetUrl, crawlerOptions.robotsTxt);
+            }
+            if (rpcReflect.signal.aborted) {
+                return;
+            }
+            rpcReflect.catch((err) => {
+                if (!(err instanceof AssertionFailureError)) {
+                    return;
+                }
+                const nowDate = new Date();
+                this.storageLayer.storeConsecutiveError({
+                    _id: this.getUrlDigest(targetUrl),
+                    url: targetUrl.toString(),
+                    lastError: `${err}`,
+                    updatedAt: nowDate,
+                    createdAt: nowDate,
+                    expireAt: new Date(Date.now() + this.abuseBlockMs),
+                    count: 1,
+                }).catch((err) => {
+                    this.logger.warn(`Failed to save consecutive error for ${targetUrl}`, { err: marshalErrorLike(err) });
+                });
+            });
+            if (!ctx.accepts('text/plain') && ctx.accepts('text/event-stream')) {
+                const sseStream = new OutputServerEventStream();
+                rpcReflect.return(sseStream);
+                let scrapped: PageSnapshot;
+                const seenSnapshot = new WeakSet();
+                let job;
+                const writeToStream = async () => {
+                    if (seenSnapshot.has(scrapped)) {
+                        job = undefined;
+                        return;
+                    }
+                    rpcReflect.signal.throwIfAborted();
+                    const formatted = await this.formatSnapshot(crawlerOptions, scrapped!, targetUrl, this.urlValidMs);
+                    seenSnapshot.add(scrapped);
+                    finalSnapshot = scrapped;
+                    chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
+                    if (!sseStream.writableEnded) {
+                        sseStream.write({
+                            event: 'data',
+                            data: formatted,
+                        });
+                    }
+                    job = undefined;
+                };
+
+                try {
+                    for await (const snapshot of this.iterSnapshots(targetUrl, crawlOpts, crawlerOptions)) {
+                        if (rpcReflect.signal.aborted || sseStream.writableEnded) {
+                            break;
+                        }
+                        if (!snapshot) {
+                            continue;
+                        }
+                        scrapped = snapshot;
+                        if (job) {
+                            continue;
+                        }
+                        job = writeToStream();
+
+                        if (chargeAmount && scrapped.blobs?.length) {
+                            break;
+                        }
+                    }
+                } catch (err: any) {
+                    this.logger.error(`Failed to crawl ${targetUrl}`, { err: marshalErrorLike(err) });
+                    await Promise.allSettled([job]).then(() => {
+                        sseStream.end({
+                            event: 'error',
+                            data: marshalErrorLike(err),
+                        });
                     });
-                }
-                job = undefined;
-            };
 
-            try {
-                for await (const snapshot of this.iterSnapshots(targetUrl, crawlOpts, crawlerOptions)) {
-                    if (rpcReflect.signal.aborted || sseStream.writableEnded) {
-                        break;
-                    }
-                    if (!snapshot) {
-                        continue;
-                    }
-                    scrapped = snapshot;
-                    if (job) {
-                        continue;
-                    }
-                    job = writeToStream();
-
-                    if (chargeAmount && scrapped.blobs?.length) {
-                        break;
-                    }
+                    return sseStream;
                 }
-            } catch (err: any) {
-                this.logger.error(`Failed to crawl ${targetUrl}`, { err: marshalErrorLike(err) });
-                await Promise.allSettled([job]).then(() => {
-                    sseStream.end({
+                await writeToStream().catch((err) => {
+                    sseStream.write({
                         event: 'error',
                         data: marshalErrorLike(err),
                     });
                 });
 
+                sseStream.end();
+
                 return sseStream;
             }
-            await writeToStream().catch((err) => {
-                sseStream.write({
-                    event: 'error',
-                    data: marshalErrorLike(err),
+
+            let lastScrapped;
+            if (!ctx.accepts('text/plain') && (ctx.accepts('text/json') || ctx.accepts('application/json'))) {
+                try {
+                    for await (const scrapped of this.iterSnapshots(targetUrl, crawlOpts, crawlerOptions)) {
+                        if (rpcReflect.signal.aborted) {
+                            break;
+                        }
+                        if (!scrapped) {
+                            continue;
+                        }
+                        lastScrapped = scrapped;
+                        if (!crawlerOptions.isSnapshotAcceptableForEarlyResponse(scrapped)) {
+                            continue;
+                        }
+                        if (!scrapped.title && !scrapped.blobs?.length) {
+                            continue;
+                        }
+
+                        rpcReflect.signal.throwIfAborted();
+                        const formatted = await this.formatSnapshot(crawlerOptions, scrapped, targetUrl, this.urlValidMs);
+                        chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
+
+                        if (scrapped?.blobs?.length && !chargeAmount) {
+                            continue;
+                        }
+
+                        return formatted;
+                    }
+                } catch (err) {
+                    if (!lastScrapped) {
+                        throw err;
+                    }
+                }
+
+                if (!lastScrapped) {
+                    if (crawlOpts.targetSelector) {
+                        throw new AssertionFailureError(`No content available for URL ${targetUrl} with target selector ${Array.isArray(crawlOpts.targetSelector) ? crawlOpts.targetSelector.join(', ') : crawlOpts.targetSelector}`);
+                    }
+                    throw new AssertionFailureError(`No content available for URL ${targetUrl}`);
+                }
+
+                rpcReflect.signal.throwIfAborted();
+                const formatted = await this.formatSnapshot(crawlerOptions, lastScrapped, targetUrl, this.urlValidMs);
+                chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
+                finalSnapshot = lastScrapped;
+
+                return formatted;
+            }
+
+            if (crawlerOptions.isRequestingCompoundContentFormat()) {
+                throw new ParamValidationError({
+                    path: 'respondWith',
+                    message: `Looks like you might be requesting compound content format, please explicitly accept 'text/event-stream' or 'application/json' in header, or check your request.`
                 });
-            });
+            }
 
-            sseStream.end();
-
-            return sseStream;
-        }
-
-        let lastScrapped;
-        if (!ctx.accepts('text/plain') && (ctx.accepts('text/json') || ctx.accepts('application/json'))) {
             try {
                 for await (const scrapped of this.iterSnapshots(targetUrl, crawlOpts, crawlerOptions)) {
                     if (rpcReflect.signal.aborted) {
@@ -467,12 +526,9 @@ export class CrawlerHost extends RPCHost {
                     rpcReflect.signal.throwIfAborted();
                     const formatted = await this.formatSnapshot(crawlerOptions, scrapped, targetUrl, this.urlValidMs);
                     chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
+                    finalSnapshot = lastScrapped;
 
-                    if (scrapped?.blobs?.length && !chargeAmount) {
-                        continue;
-                    }
-
-                    return formatted;
+                    return this._finalFormat(crawlerOptions, formatted);
                 }
             } catch (err) {
                 if (!lastScrapped) {
@@ -486,63 +542,15 @@ export class CrawlerHost extends RPCHost {
                 }
                 throw new AssertionFailureError(`No content available for URL ${targetUrl}`);
             }
-
             rpcReflect.signal.throwIfAborted();
             const formatted = await this.formatSnapshot(crawlerOptions, lastScrapped, targetUrl, this.urlValidMs);
             chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
             finalSnapshot = lastScrapped;
 
-            return formatted;
+            return this._finalFormat(crawlerOptions, formatted);
+        } finally {
+            releaseReaderSlot();
         }
-
-        if (crawlerOptions.isRequestingCompoundContentFormat()) {
-            throw new ParamValidationError({
-                path: 'respondWith',
-                message: `Looks like you might be requesting compound content format, please explicitly accept 'text/event-stream' or 'application/json' in header, or check your request.`
-            });
-        }
-
-        try {
-            for await (const scrapped of this.iterSnapshots(targetUrl, crawlOpts, crawlerOptions)) {
-                if (rpcReflect.signal.aborted) {
-                    break;
-                }
-                if (!scrapped) {
-                    continue;
-                }
-                lastScrapped = scrapped;
-                if (!crawlerOptions.isSnapshotAcceptableForEarlyResponse(scrapped)) {
-                    continue;
-                }
-                if (!scrapped.title && !scrapped.blobs?.length) {
-                    continue;
-                }
-
-                rpcReflect.signal.throwIfAborted();
-                const formatted = await this.formatSnapshot(crawlerOptions, scrapped, targetUrl, this.urlValidMs);
-                chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
-                finalSnapshot = lastScrapped;
-
-                return this._finalFormat(crawlerOptions, formatted);
-            }
-        } catch (err) {
-            if (!lastScrapped) {
-                throw err;
-            }
-        }
-
-        if (!lastScrapped) {
-            if (crawlOpts.targetSelector) {
-                throw new AssertionFailureError(`No content available for URL ${targetUrl} with target selector ${Array.isArray(crawlOpts.targetSelector) ? crawlOpts.targetSelector.join(', ') : crawlOpts.targetSelector}`);
-            }
-            throw new AssertionFailureError(`No content available for URL ${targetUrl}`);
-        }
-        rpcReflect.signal.throwIfAborted();
-        const formatted = await this.formatSnapshot(crawlerOptions, lastScrapped, targetUrl, this.urlValidMs);
-        chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
-        finalSnapshot = lastScrapped;
-
-        return this._finalFormat(crawlerOptions, formatted);
     }
 
     private _finalFormat(crawlerOptions: CrawlerOptions, formatted: FormattedPage) {
