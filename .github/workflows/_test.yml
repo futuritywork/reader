@@ -25,6 +25,7 @@ jobs:
       - name: npm install
         run: |
           npm ci
+          rm -rf "$HOME/.cache/puppeteer"
           npx puppeteer browsers install chrome
           echo "READER_MAX_WORKERS=2" >> "$GITHUB_ENV"
       - name: get non-redistributable assets
