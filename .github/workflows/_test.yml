@@ -30,10 +30,14 @@ jobs:
       - name: build application
         run: npm run build
 
+      - name: Futurity regressions
+        run: npm run test:futurity
+
       - name: tests with coverage
         run: npm run test:coverage
 
       - name: upload coverage to Codecov
+        if: github.repository == 'jina-ai/reader'
         uses: codecov/codecov-action@v6
         with:
           files: coverage/lcov.info

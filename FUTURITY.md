@@ -1,7 +1,7 @@
 # Futurity Reader fork
 
 This is a GitHub fork of [jina-ai/reader](https://github.com/jina-ai/reader).
-`main` tracks upstream; `alex/reader-resource-bounds` starts from upstream commit
+`main` contains Futurity patches on upstream commit
 `1574bfd380d249c86c82db4dace0d9c8fe17e2b1`, the source revision of our pinned image.
 Reader's original license and notices remain in place.
 
@@ -71,14 +71,32 @@ container limit. These results describe the deployed overlay, not a new benchmar
 of this source-built branch, and do not explain the old Railway process's 25 GB
 memory accumulation or establish long-term leak-free behavior.
 
+## Container publishing
+
+The Publish Reader image workflow builds and tests the TypeScript source and
+amd64 container on pull requests. Main pushes and manual runs on main publish
+that tested container as `ghcr.io/futuritywork/reader:sha-<full-commit-sha>`.
+No deployment runs from this workflow. The run summary records the immutable
+`ghcr.io/futuritywork/reader@sha256:...` reference to use in deployment manifests.
+Tags identify builds; deploy by digest. A manual rerun may rebuild a commit with
+new external assets or Chrome packages, so its digest may differ.
+
+The package must be public for anonymous pulls. Verify that visibility after
+first publication, then verify an unauthenticated pull before using it on k3s.
+Publishing uses the repository's temporary `GITHUB_TOKEN`; no registry secret
+is stored on the cluster. CI caches are build caches, not release artifacts.
+
+The source-built image is separate from the currently deployed overlay. Before
+switching production, run the workload and compatibility probes on its digest,
+retain the old image for rollback, and obtain the normal Agent Gate approval.
+The current deployment uses a node-local image and `imagePullPolicy: Never`;
+registry deployment will require the published digest and `IfNotPresent`.
+
 ## Updating
 
 ```sh
 git fetch upstream
-git switch main
-git merge --ff-only upstream/main
-git push origin main
-git switch alex/reader-resource-bounds
+git switch -c alex/reader-upstream-update main
 git merge upstream/main
 npm ci
 npm run build
@@ -86,9 +104,9 @@ npm run test:futurity
 npm test
 ```
 
-Keep upstream updates separate from patch commits and resolve conflicts in the
-TypeScript sources. Review the curl dependency when its hash changes; do not
-silently bypass the guard. The pinned overlay needs its image/source hashes and
-replacement counts reviewed separately after an upstream update. Deploying a
-rebased source build requires new image and workload validation plus the normal
-Agent Gate cutover approval.
+Keep upstream updates separate from patch commits and submit the update branch
+as a pull request to the fork. Resolve conflicts in the TypeScript sources.
+Review the curl dependency when its hash changes; do not bypass the guard.
+The pinned overlay needs its image/source hashes and replacement counts reviewed
+separately after an upstream update. Deploying a source build requires new image
+and workload validation plus the normal Agent Gate cutover approval.
