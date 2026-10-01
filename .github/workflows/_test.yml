@@ -4,7 +4,7 @@ on:
     inputs:
       node-version:
         type: string
-        default: '24.16.0'
+        default: '24.14.1'
         description: 'Node.js version to use.'
 
 jobs:
@@ -23,34 +23,17 @@ jobs:
           cache: npm
 
       - name: npm install
-        run: |
-          npm ci
-          rm -rf "$HOME/.cache/puppeteer"
-          npx puppeteer browsers install chrome
-          echo "READER_MAX_WORKERS=2" >> "$GITHUB_ENV"
+        run: npm ci
       - name: get non-redistributable assets
-        run: |
-          npm run assets:download
-          for asset in GeoLite2-City.mmdb geolite2-asn.mmdb SourceHanSansSC-Regular.otf gsa_useragents.txt; do
-            test -s "licensed/$asset"
-          done
+        run: npm run assets:download
 
       - name: build application
         run: npm run build
 
-      - name: Futurity regressions
-        run: npm run test:futurity
-
-      - name: tests
-        run: |
-          if [ "$GITHUB_REPOSITORY" = jina-ai/reader ]; then
-            npm run test:coverage
-          else
-            npm test
-          fi
+      - name: tests with coverage
+        run: npm run test:coverage
 
       - name: upload coverage to Codecov
-        if: github.repository == 'jina-ai/reader'
         uses: codecov/codecov-action@v6
         with:
           files: coverage/lcov.info

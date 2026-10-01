@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   test:
+    if: github.repository != 'futuritywork/reader'
     uses: ./.github/workflows/_test.yml
     permissions:
       contents: read

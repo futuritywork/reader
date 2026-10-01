@@ -74,7 +74,8 @@ memory accumulation or establish long-term leak-free behavior.
 ## Container publishing
 
 The Publish Reader image workflow builds and tests the TypeScript source and
-amd64 container on pull requests. Main pushes and manual runs on main publish
+amd64 container on pull requests. The full regression suite runs inside the
+candidate image with its installed Chrome and a four GB memory limit. Main pushes and manual runs on main publish
 that tested container as `ghcr.io/futuritywork/reader:sha-<full-commit-sha>`.
 No deployment runs from this workflow. The run summary records the immutable
 `ghcr.io/futuritywork/reader@sha256:...` reference to use in deployment manifests.
