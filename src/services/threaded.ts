@@ -36,6 +36,13 @@ export class ThreadedServiceRegistry extends AbstractThreadedServiceRegistry {
         const isLikelyHyperThreaded = (oddCpuCycles / evenCpuCycles) < 0.5;
 
         this.maxWorkers = isLikelyHyperThreaded ? cpuStat.length / 2 : cpuStat.length;
+        if (process.env.READER_MAX_WORKERS !== undefined) {
+            const configuredMaxWorkers = Number(process.env.READER_MAX_WORKERS);
+            if (!Number.isInteger(configuredMaxWorkers) || configuredMaxWorkers < 2) {
+                throw new Error('READER_MAX_WORKERS must be an integer of at least two');
+            }
+            this.maxWorkers = Math.min(this.maxWorkers, configuredMaxWorkers);
+        }
     }
 
     override async init() {
