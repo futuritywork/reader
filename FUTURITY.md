@@ -19,7 +19,7 @@ Reader's original license and notices remain in place.
 
 The commits separate Reader lifecycle changes, worker configuration, admission
 policy, and the dependency fix so they can be reviewed or submitted independently.
-The curl fix belongs upstream in that dependency; it is not a Reader source fix.
+The curl fix belongs upstream in [nomagick/node-libcurl-impersonate](https://github.com/nomagick/node-libcurl-impersonate); it is not a Reader source fix.
 Admission defaults are Futurity's deployment policy and may need configurable
 limits for a general upstream proposal. No upstream issue or PR has been posted.
 
@@ -34,6 +34,11 @@ npm run test:futurity
 npm test
 npm run lint
 ```
+
+Validation of this branch: TypeScript build passed; seven admission regressions,
+423 upstream unit tests and 403 upstream e2e tests passed in an isolated container.
+`npm run lint` exits 2 because the upstream tree has no ESLint configuration;
+this is not a lint pass.
 
 The build applies the curl patch before TypeScript compilation. The upstream
 Dockerfile also applies it after installing dependencies. No credentials are

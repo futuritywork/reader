@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const limitRequests = require("../request-limiter.cjs");
+const limitRequests = require("../overlay/request-limiter.cjs");
 const signal = () => new AbortController().signal;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
