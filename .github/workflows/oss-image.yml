@@ -40,6 +40,9 @@ jobs:
           export READER_MAX_WORKERS=2
           npm ci
           npm run assets:download
+          for asset in GeoLite2-City.mmdb geolite2-asn.mmdb SourceHanSansSC-Regular.otf gsa_useragents.txt; do
+            test -s "licensed/$asset"
+          done
           npm run build
           npm run test:futurity
           npm test

@@ -4,7 +4,7 @@ on:
     inputs:
       node-version:
         type: string
-        default: '24.14.1'
+        default: '24.16.0'
         description: 'Node.js version to use.'
 
 jobs:
@@ -30,7 +30,11 @@ jobs:
       - name: npm install
         run: npm ci
       - name: get non-redistributable assets
-        run: npm run assets:download
+        run: |
+          npm run assets:download
+          for asset in GeoLite2-City.mmdb geolite2-asn.mmdb SourceHanSansSC-Regular.otf gsa_useragents.txt; do
+            test -s "licensed/$asset"
+          done
 
       - name: build application
         run: npm run build
@@ -38,8 +42,13 @@ jobs:
       - name: Futurity regressions
         run: npm run test:futurity
 
-      - name: tests with coverage
-        run: npm run test:coverage
+      - name: tests
+        run: |
+          if [ "$GITHUB_REPOSITORY" = jina-ai/reader ]; then
+            npm run test:coverage
+          else
+            npm test
+          fi
 
       - name: upload coverage to Codecov
         if: github.repository == 'jina-ai/reader'
