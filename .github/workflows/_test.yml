@@ -22,13 +22,11 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: npm
 
-      - name: Use runner Chrome
-        run: |
-          echo "OVERRIDE_CHROME_EXECUTABLE_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
-          echo "READER_MAX_WORKERS=2" >> "$GITHUB_ENV"
-
       - name: npm install
-        run: npm ci
+        run: |
+          npm ci
+          npx puppeteer browsers install chrome
+          echo "READER_MAX_WORKERS=2" >> "$GITHUB_ENV"
       - name: get non-redistributable assets
         run: |
           npm run assets:download

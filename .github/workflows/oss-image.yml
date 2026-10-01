@@ -35,10 +35,9 @@ jobs:
           cache: npm
       - name: Build and test application
         run: |
-          OVERRIDE_CHROME_EXECUTABLE_PATH=$(command -v google-chrome)
-          export OVERRIDE_CHROME_EXECUTABLE_PATH
           export READER_MAX_WORKERS=2
           npm ci
+          npx puppeteer browsers install chrome
           npm run assets:download
           for asset in GeoLite2-City.mmdb geolite2-asn.mmdb SourceHanSansSC-Regular.otf gsa_useragents.txt; do
             test -s "licensed/$asset"
