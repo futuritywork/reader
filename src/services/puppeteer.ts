@@ -1090,6 +1090,21 @@ export class PuppeteerControl extends AsyncService {
         const preparations: Promise<unknown>[] = [];
         const page = await this.getNextPage();
         this.lifeCycleTrack.set(page, this.asyncLocalContext.ctx);
+        const readerAbortSignal = this.asyncLocalContext.get('readerAbortSignal') as AbortSignal | undefined;
+        const readerAbortDeferred = Defer();
+        readerAbortDeferred.promise.catch(() => void 0);
+        const closeCancelledPage = () => {
+            readerAbortDeferred.reject(new Error('Reader request cancelled'));
+            void this.ditchPage(page);
+        };
+        if (readerAbortSignal) {
+            readerAbortSignal.addEventListener('abort', closeCancelledPage, { once: true });
+            page.once('close', () => readerAbortSignal.removeEventListener('abort', closeCancelledPage));
+            if (readerAbortSignal.aborted) {
+                await this.ditchPage(page);
+                return;
+            }
+        }
 
         page.on('response', async (resp) => {
             this.blackHoleDetector.itWorked();
@@ -1482,8 +1497,8 @@ export class PuppeteerControl extends AsyncService {
                 const pSubFrameSnapshots = this.snapshotChildFrames(page);
                 const detachFlag = options.detachInvisibles ? 'true' : 'false';
                 snapshot = await page.evaluate(`giveSnapshot(true, undefined, ${detachFlag})`) as PageSnapshot;
-                screenshot = (await this.takeScreenShot(page)) || screenshot;
-                pageshot = (await this.takeScreenShot(page, { fullPage: true })) || pageshot;
+                screenshot = (options.favorScreenshot ? await this.takeScreenShot(page) : undefined) || screenshot;
+                pageshot = (options.favorScreenshot ? await this.takeScreenShot(page, { fullPage: true }) : undefined) || pageshot;
                 if (snapshot) {
                     snapshot.childFrames = await pSubFrameSnapshots;
                 }
@@ -1570,7 +1585,7 @@ export class PuppeteerControl extends AsyncService {
             }
             let lastHTML = snapshot?.html;
             while (true) {
-                const ckpt = [nextSnapshotDeferred.promise, waitForPromise ?? gotoPromise];
+                const ckpt = [nextSnapshotDeferred.promise, waitForPromise ?? gotoPromise, readerAbortDeferred.promise];
 
                 if (options.minIntervalMs) {
                     ckpt.push(delay(options.minIntervalMs));

@@ -345,6 +345,7 @@ export class CrawlerHost extends RPCHost {
             }
         }
         const crawlOpts = await this.configure(crawlerOptions);
+        this.threadLocal.set('readerAbortSignal', rpcReflect.signal);
         if (auth.isInternal) {
             crawlOpts.eligibleForPageIndex = true;
             this.threadLocal.set('isInternal', true);
@@ -390,6 +391,7 @@ export class CrawlerHost extends RPCHost {
                     job = undefined;
                     return;
                 }
+                rpcReflect.signal.throwIfAborted();
                 const formatted = await this.formatSnapshot(crawlerOptions, scrapped!, targetUrl, this.urlValidMs);
                 seenSnapshot.add(scrapped);
                 finalSnapshot = scrapped;
@@ -462,6 +464,7 @@ export class CrawlerHost extends RPCHost {
                         continue;
                     }
 
+                    rpcReflect.signal.throwIfAborted();
                     const formatted = await this.formatSnapshot(crawlerOptions, scrapped, targetUrl, this.urlValidMs);
                     chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
 
@@ -484,6 +487,7 @@ export class CrawlerHost extends RPCHost {
                 throw new AssertionFailureError(`No content available for URL ${targetUrl}`);
             }
 
+            rpcReflect.signal.throwIfAborted();
             const formatted = await this.formatSnapshot(crawlerOptions, lastScrapped, targetUrl, this.urlValidMs);
             chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
             finalSnapshot = lastScrapped;
@@ -514,6 +518,7 @@ export class CrawlerHost extends RPCHost {
                     continue;
                 }
 
+                rpcReflect.signal.throwIfAborted();
                 const formatted = await this.formatSnapshot(crawlerOptions, scrapped, targetUrl, this.urlValidMs);
                 chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
                 finalSnapshot = lastScrapped;
@@ -532,6 +537,7 @@ export class CrawlerHost extends RPCHost {
             }
             throw new AssertionFailureError(`No content available for URL ${targetUrl}`);
         }
+        rpcReflect.signal.throwIfAborted();
         const formatted = await this.formatSnapshot(crawlerOptions, lastScrapped, targetUrl, this.urlValidMs);
         chargeAmount = this.assignChargeAmount(formatted, tierPolicy);
         finalSnapshot = lastScrapped;
