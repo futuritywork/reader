@@ -18,7 +18,7 @@ ARTIFACTS=(
     "GeoLite2-City.mmdb|https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download/GeoLite2-City.mmdb"
     "geolite2-asn.mmdb|https://cdn.jsdelivr.net/npm/@ip-location-db/geolite2-asn-mmdb/geolite2-asn.mmdb"
     "SourceHanSansSC-Regular.otf|https://raw.githubusercontent.com/adobe-fonts/source-han-sans/refs/heads/release/OTF/SimplifiedChinese/SourceHanSansSC-Regular.otf"
-    "gsa_useragents.txt|https://raw.githubusercontent.com/searxng/searxng/refs/heads/master/searx/data/gsa_useragents.txt"
+    "gsa_useragents.txt|https://raw.githubusercontent.com/searxng/searxng/0e990f78a350b583264762da7b8273a2ab024704/searx/data/gsa_useragents.txt"
 )
 
 failed=0
