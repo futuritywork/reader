@@ -25,7 +25,8 @@ RUN useradd -g jina  -G audio,video -m jina
 USER jina
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+COPY futurity/apply-curl.mjs ./futurity/apply-curl.mjs
+RUN npm ci && npm run patch:curl
 COPY build ./build
 COPY public ./public
 COPY licensed ./licensed

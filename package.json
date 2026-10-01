@@ -4,7 +4,7 @@
   "scripts": {
     "lint": "eslint --ext .js,.ts .",
     "assets:download": "bash ./download-external-assets.sh",
-    "build": "node ./integrity-check.cjs && tsc -p .",
+    "build": "npm run patch:curl && node ./integrity-check.cjs && tsc -p .",
     "build:watch": "tsc --watch",
     "build:clean": "rm -rf ./build",
     "serve": "npm run build && npm run start",
@@ -16,7 +16,9 @@
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit:coverage": "tsc -p tests/tsconfig.json && c8 node tests-build/run-unit.js",
     "test:e2e:coverage": "tsc -p tests/tsconfig.json && c8 node tests-build/run.js",
-    "test:coverage": "tsc -p tests/tsconfig.json && c8 --reporter=none node tests-build/run-unit.js && c8 --no-clean --reporter=none node tests-build/run.js && c8 report"
+    "test:coverage": "tsc -p tests/tsconfig.json && c8 --reporter=none node tests-build/run-unit.js && c8 --no-clean --reporter=none node tests-build/run.js && c8 report",
+    "patch:curl": "node futurity/apply-curl.mjs",
+    "test:futurity": "node --test tests/futurity/request-limiter.test.cjs"
   },
   "engines": {
     "node": ">=22.15"
